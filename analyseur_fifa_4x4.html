@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyseur FIFA 4x4</title>
+<style>
+:root{--bg:#0b1220;--panel:#131f33;--panel2:#1a2942;--text:#eef4ff;--muted:#a9b8d0;--accent:#42d3a5;--line:#2b3b56;--warn:#ffd166}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(140deg,#08101d,#101d32);color:var(--text);font:15px/1.5 Arial,sans-serif}
+header{padding:28px 18px 18px;text-align:center}h1{margin:0;font-size:clamp(25px,5vw,38px)}header p{color:var(--muted);margin:8px auto;max-width:720px}
+main{max-width:1150px;margin:auto;padding:0 14px 40px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:15px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:17px;box-shadow:0 8px 25px #0003;margin-bottom:15px}
+h2{font-size:19px;margin:0 0 12px}h3{font-size:16px;margin:16px 0 8px;color:var(--accent)}
+label{display:block;color:var(--muted);font-size:13px;margin:9px 0 5px}input,textarea,button{font:inherit}input,textarea{width:100%;background:#0b1628;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px}
+textarea{min-height:150px;resize:vertical;font-family:ui-monospace,monospace;font-size:13px}
+.small{font-size:12px;color:var(--muted)}.row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+button{border:0;border-radius:9px;padding:12px 17px;background:var(--accent);color:#06251d;font-weight:700;cursor:pointer}
+button.secondary{background:#2b3b56;color:var(--text)}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:15px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:9px 7px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
+.pill{display:inline-block;background:#203b49;color:#8cf0cf;padding:3px 8px;border-radius:20px;font-size:12px}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.metric{background:var(--panel2);padding:12px;border-radius:10px}.metric b{font-size:21px;display:block;margin-top:4px}
+.notice{color:var(--warn);font-size:13px}.hidden{display:none}.foot{color:var(--muted);font-size:12px;text-align:center;margin-top:18px}
+@media(max-width:520px){.row{grid-template-columns:1fr}table{font-size:12px}th,td{padding:7px 4px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ Analyseur FIFA 4x4</h1>
+  <p>Saisis les résultats récents des deux équipes et les cotes 1X2. L'outil estime les probabilités des marchés de buts et du résultat final.</p>
+</header>
+<main>
+  <section class="grid">
+    <div class="card">
+      <h2>Équipe 1</h2>
+      <label>Nom de l'équipe</label><input id="name1" value="Équipe 1">
+      <label>Historique — une ligne par match : buts marqués, buts encaissés</label>
+      <textarea id="data1" placeholder="5,3&#10;4,2&#10;6,4&#10;3,3"></textarea>
+      <div class="small">Maximum conseillé : 30 matchs. Exemple : 5,3 signifie 5 buts marqués et 3 encaissés.</div>
+    </div>
+    <div class="card">
+      <h2>Équipe 2</h2>
+      <label>Nom de l'équipe</label><input id="name2" value="Équipe 2">
+      <label>Historique — une ligne par match : buts marqués, buts encaissés</label>
+      <textarea id="data2" placeholder="3,5&#10;5,3&#10;4,4&#10;6,2"></textarea>
+      <div class="small">Entre les scores dans l'ordre le plus récent en premier.</div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Cotes du bookmaker — facultatif</h2>
+    <div class="row">
+      <div><label>Cote 1</label><input id="odd1" type="number" min="1.01" step="0.01" placeholder="2.10"></div>
+      <div><label>Cote X</label><input id="oddX" type="number" min="1.01" step="0.01" placeholder="4.00"></div>
+      <div><label>Cote 2</label><input id="odd2" type="number" min="1.01" step="0.01" placeholder="2.30"></div>
+    </div>
+    <div class="actions">
+      <button onclick="analyze()">Analyser le match</button>
+      <button class="secondary" onclick="resetAll()">Effacer</button>
+    </div>
+    <div class="notice">Les estimations reposent sur les historiques saisis et un modèle de Poisson indépendant. Elles ne garantissent aucun résultat.</div>
+  </section>
+  <section id="output" class="hidden">
+    <div class="card">
+      <h2>Résumé statistique</h2>
+      <div id="summary" class="result-grid"></div>
+    </div>
+    <div class="card">
+      <h2>Marchés — buts de chaque équipe</h2>
+      <div id="teamMarkets"></div>
+    </div>
+    <div class="card">
+      <h2>Total de buts du match</h2>
+      <div id="totalMarkets"></div>
+    </div>
+    <div class="card">
+      <h2>Résultat 1X2</h2>
+      <div id="oneXtwo"></div>
+    </div>
+    <div class="card">
+      <h2>Scores exacts les plus probables</h2>
+      <div id="scores"></div>
+    </div>
+  </section>
+  <div class="foot">Outil local : les données restent dans cette page et ne sont envoyées à aucun serveur.</div>
+</main>
+<script>
+function parseRows(id){
+  const raw=document.getElementById(id).value.trim();
+  if(!raw) throw new Error("Ajoute au moins un résultat pour chaque équipe.");
+  const rows=raw.split(/\n|;/).map(x=>x.trim()).filter(Boolean).map(line=>{
+    const nums=line.match(/\d+/g);
+    if(!nums||nums.length<2) throw new Error("Format invalide. Utilise : buts marqués,buts encaissés (ex. 5,3).");
+    return {f:Number(nums[0]),a:Number(nums[1])};
+  });
+  if(rows.some(r=>r.f>30||r.a>30)) throw new Error("Vérifie les scores saisis.");
+  return rows.slice(0,30);
+}
+function avg(a){return a.reduce((s,x)=>s+x,0)/a.length}
+function poisson(k,mu){let p=Math.exp(-mu);for(let i=1;i<=k;i++)p*=mu/i;return p}
+function dist(mu,max=20){let a=[];for(let i=0;i<=max;i++)a.push(poisson(i,mu));let s=a.reduce((x,y)=>x+y,0);return a.map(x=>x/s)}
+function pct(x){return (100*x).toFixed(1)+" %"}
+function marketTable(rows){return `<table><thead><tr><th>Marché</th><th>Probabilité estimée</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r[0]}</td><td><b>${pct(r[1])}</b></td></tr>`).join("")}</tbody></table>`}
+function analyze(){
+ try{
+  const a=parseRows("data1"),b=parseRows("data2");
+  const n1=document.getElementById("name1").value||"Équipe 1",n2=document.getElementById("name2").value||"Équipe 2";
+  // Forme récente : poids légèrement supérieur aux 10 premiers matchs.
+  function weighted(rows,key){let vals=rows.map(x=>x[key]);let weights=vals.map((_,i)=>Math.pow(.94,i));return vals.reduce((s,v,i)=>s+v*weights[i],0)/weights.reduce((s,w)=>s+w,0)}
+  const aFor=weighted(a,"f"),aAgainst=weighted(a,"a"),bFor=weighted(b,"f"),bAgainst=weighted(b,"a");
+  const l1=(aFor+bAgainst)/2,l2=(bFor+aAgainst)/2;
+  const d1=dist(l1),d2=dist(l2);
+  let total=Array(41).fill(0),p1=0,px=0,p2=0,scoreList=[];
+  for(let i=0;i<d1.length;i++)for(let j=0;j<d2.length;j++){
+    let p=d1[i]*d2[j];total[i+j]+=p;
+    if(i>j)p1+=p;else if(i===j)px+=p;else p2+=p;
+    scoreList.push({s:`${i} - ${j}`,p});
+  }
+  const over=(d,t)=>d.slice(t+1).reduce((s,x)=>s+x,0);
+  const under=(d,t)=>d.slice(0,t+1).reduce((s,x)=>s+x,0);
+  const teamRows=[];
+  [[n1,d1],[n2,d2]].forEach(([name,d])=>{
+    let r=[];
+    for(let k=1;k<=5;k++)r.push([`${name} marque ${k}+`,over(d,k-1)]);
+    for(let k=1;k<=5;k++)r.push([`${name} marque moins de ${k} (0 à ${k-1})`,under(d,k-1)]);
+    teamRows.push(`<h3>${name}</h3>${marketTable(r)}`);
+  });
+  const totalRows=[];
+  for(let k=1;k<=10;k++)totalRows.push([`Total +${k}.5 buts`,over(total,k)]);
+  for(let k=1;k<=10;k++)totalRows.push([`Total -${k}.5 buts`,under(total,k)]);
+  // Exact integer thresholds, shown separately to avoid confusing Asian/half-goal lines.
+  const summary=[
+    ["Moyenne marquée — "+n1,aFor.toFixed(2)],
+    ["Moyenne encaissée — "+n1,aAgainst.toFixed(2)],
+    ["Moyenne marquée — "+n2,bFor.toFixed(2)],
+    ["Moyenne encaissée — "+n2,bAgainst.toFixed(2)],
+    ["Buts attendus — "+n1,l1.toFixed(2)],
+    ["Buts attendus — "+n2,l2.toFixed(2)]
+  ];
+  document.getElementById("summary").innerHTML=summary.map(x=>`<div class="metric"><span class="small">${x[0]}</span><b>${x[1]}</b></div>`).join("");
+  document.getElementById("teamMarkets").innerHTML=teamRows.join("");
+  document.getElementById("totalMarkets").innerHTML=marketTable(totalRows);
+  const odds=[Number(document.getElementById("odd1").value),Number(document.getElementById("oddX").value),Number(document.getElementById("odd2").value)];
+  const probs=[p1,px,p2],labels=[`1 — ${n1}`,"X — Nul",`2 — ${n2}`];
+  document.getElementById("oneXtwo").innerHTML=`<table><thead><tr><th>Résultat</th><th>Probabilité</th><th>Cote saisie</th><th>Écart vs probabilité implicite*</th></tr></thead><tbody>${labels.map((l,i)=>{
+    let imp=odds[i]>1?1/odds[i]:null;return `<tr><td>${l}</td><td><b>${pct(probs[i])}</b></td><td>${odds[i]>1?odds[i].toFixed(2):"—"}</td><td>${imp===null?"—":(100*(probs[i]-imp)).toFixed(1)+" pts"}</td>`;
+  }).join("")}</tbody></table><p class="small">* Écart simple avec 1/cote, sans correction de la marge du bookmaker.</p>`;
+  scoreList.sort((x,y)=>y.p-x.p);
+  document.getElementById("scores").innerHTML=marketTable(scoreList.slice(0,8).map(x=>[x.s,x.p]));
+  document.getElementById("output").classList.remove("hidden");
+  document.getElementById("output").scrollIntoView({behavior:"smooth"});
+ }catch(e){alert(e.message)}
+}
+function resetAll(){
+ ["data1","data2","odd1","oddX","odd2"].forEach(id=>document.getElementById(id).value="");
+ document.getElementById("output").classList.add("hidden");
+}
+</script>
+</body>
+</html>
